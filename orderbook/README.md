@@ -98,3 +98,5 @@ On shutdown it:
 2. Performs one final flush per symbol.
 3. Closes WebSocket connections.
 4. Exits cleanly.
+
+
