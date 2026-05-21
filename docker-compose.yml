@@ -1,0 +1,26 @@
+services:
+  postgres:
+    build:
+      context: ./deployments/postgres
+    # PG_CONFIG_FILE is provided through env_file in each overlay.
+    command: ["sh", "-c", "postgres -c config_file=$${PG_CONFIG_FILE}"]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # Use container env vars so health checks validate expected DB/user.
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - broker_network
+
+volumes:
+  postgres_data:
+    name: postgres_data
+
+networks:
+  broker_network:
+    driver: bridge

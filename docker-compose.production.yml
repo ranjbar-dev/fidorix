@@ -1,0 +1,15 @@
+services:
+  postgres:
+    container_name: broker_postgres_prod
+    env_file:
+      - ./deployments/postgres/.env.production
+    build:
+      args:
+        # BUILD_ENV is kept for explicit build provenance.
+        BUILD_ENV: production
+    # No host ports in production: DB is reachable only on broker_network.
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 6G

@@ -1,0 +1,12 @@
+services:
+  postgres:
+    container_name: broker_postgres_dev
+    env_file:
+      - ./deployments/postgres/.env.development
+    build:
+      args:
+        # BUILD_ENV is kept for explicit build provenance.
+        BUILD_ENV: development
+    ports:
+      # Exposed in development for local tooling (pgAdmin, DBeaver, psql).
+      - "5432:5432"
