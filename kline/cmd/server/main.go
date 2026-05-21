@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"mexc-kline-snapshot/internal/config"
+	"mexc-kline-snapshot/internal/db"
+	"mexc-kline-snapshot/internal/redisclient"
 	"mexc-kline-snapshot/internal/rest"
 	"mexc-kline-snapshot/internal/store"
 	"mexc-kline-snapshot/internal/symbol"
@@ -44,15 +46,33 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	s := store.New()
+	timescaleDB := initTimescale(ctx, cfg, log)
+	if timescaleDB != nil {
+		defer timescaleDB.Close()
+	}
+
+	redisClient := initRedis(cfg, log)
+	if redisClient != nil {
+		defer func() {
+			if err := redisClient.Close(); err != nil {
+				log.Warn("failed to close redis client", zap.Error(err))
+			}
+		}()
+	}
+
+	s := store.NewFull(timescaleDB, redisClient)
 
 	if err := ensureIntervalDirs(cfg.KlineDir, cfg.Intervals); err != nil {
 		log.Fatal("failed to create output directories", zap.Error(err))
 	}
 
-	preloadExistingFiles(cfg, s, log)
+	if timescaleDB != nil {
+		preloadLatestFromDB(cfg, s, timescaleDB, log)
+	} else {
+		preloadExistingFiles(cfg, s, log)
+	}
 
-	if err := rest.Bootstrap(ctx, cfg, s, cfg.KlineDir, log); err != nil {
+	if err := rest.Bootstrap(ctx, cfg, s, cfg.KlineDir, timescaleDB, log); err != nil {
 		if errors.Is(err, context.Canceled) {
 			log.Info("bootstrap canceled")
 			flushOnShutdown(s, cfg.KlineDir, log)
@@ -150,6 +170,62 @@ func preloadExistingFiles(cfg *config.Config, s *store.Store, log *zap.Logger) {
 			s.Load(wireSymbol, interval, cf)
 		}
 	}
+}
+
+func preloadLatestFromDB(cfg *config.Config, s *store.Store, d *db.DB, log *zap.Logger) {
+	limit := cfg.BootstrapLimit
+	if limit <= 0 {
+		limit = 2000
+	}
+
+	for _, fileSymbol := range cfg.Symbols {
+		wireSymbol := symbol.ToMEXC(fileSymbol)
+		for _, interval := range cfg.Intervals {
+			loadCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			candles, err := d.LoadLatest(loadCtx, wireSymbol, interval, limit)
+			cancel()
+			if err != nil {
+				log.Warn("failed to preload candles from timescaledb; using empty cache", zap.String("symbol", wireSymbol), zap.String("interval", interval), zap.Error(err))
+				candles = nil
+			}
+
+			s.Load(wireSymbol, interval, store.CandleFile{
+				Symbol:   wireSymbol,
+				Interval: interval,
+				Candles:  candles,
+			})
+		}
+	}
+}
+
+func initTimescale(ctx context.Context, cfg *config.Config, log *zap.Logger) *db.DB {
+	dsn := strings.TrimSpace(cfg.TimescaleDSN)
+	if dsn == "" {
+		return nil
+	}
+
+	openCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	d, err := db.New(openCtx, dsn)
+	if err != nil {
+		log.Warn("timescaledb init failed; continuing without timescaledb", zap.Error(err))
+		return nil
+	}
+
+	log.Info("timescaledb enabled")
+	return d
+}
+
+func initRedis(cfg *config.Config, log *zap.Logger) *redisclient.Client {
+	addr := strings.TrimSpace(cfg.RedisAddr)
+	if addr == "" {
+		return nil
+	}
+
+	r := redisclient.New(addr, cfg.RedisPassword, cfg.RedisDB)
+	log.Info("redis latest/publish enabled", zap.String("addr", addr), zap.Int("db", cfg.RedisDB))
+	return r
 }
 
 // countCandles computes the total candles currently loaded in the store.

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"mexc-kline-snapshot/internal/config"
+	"mexc-kline-snapshot/internal/db"
 	"mexc-kline-snapshot/internal/kline"
 	"mexc-kline-snapshot/internal/store"
 	"mexc-kline-snapshot/internal/symbol"
@@ -18,7 +19,7 @@ import (
 )
 
 // Bootstrap fetches historical candles and merges them into local files and store.
-func Bootstrap(ctx context.Context, cfg *config.Config, s *store.Store, baseDir string, log *zap.Logger) error {
+func Bootstrap(ctx context.Context, cfg *config.Config, s *store.Store, baseDir string, d *db.DB, log *zap.Logger) error {
 	if cfg == nil {
 		return fmt.Errorf("config is nil")
 	}
@@ -64,7 +65,7 @@ launch:
 					return
 				}
 
-				fetched, err := bootstrapPair(ctx, cfg, client, s, baseDir, fileSymbol, wireSymbol, interval, log)
+				fetched, err := bootstrapPair(ctx, cfg, client, s, baseDir, d, fileSymbol, wireSymbol, interval, log)
 				if err != nil {
 					if isContractNotExist(err) {
 						if _, seen := invalidSymbols.LoadOrStore(wireSymbol, struct{}{}); !seen {
@@ -100,7 +101,7 @@ launch:
 }
 
 // bootstrapPair handles one symbol-interval bootstrap lifecycle.
-func bootstrapPair(ctx context.Context, cfg *config.Config, client *Client, s *store.Store, baseDir, fileSymbol, wireSymbol, interval string, log *zap.Logger) (int, error) {
+func bootstrapPair(ctx context.Context, cfg *config.Config, client *Client, s *store.Store, baseDir string, d *db.DB, fileSymbol, wireSymbol, interval string, log *zap.Logger) (int, error) {
 	path := filepath.Join(baseDir, interval, symbol.ToFile(fileSymbol)+".json")
 
 	existing, err := store.LoadFile(path)
@@ -144,8 +145,23 @@ func bootstrapPair(ctx context.Context, cfg *config.Config, client *Client, s *s
 		return 0, err
 	}
 
+	upsertMergedToDB(d, wireSymbol, interval, merged.Candles, log)
+
 	s.Load(wireSymbol, interval, merged)
 	return len(candles), nil
+}
+
+func upsertMergedToDB(d *db.DB, symbol, interval string, candles []kline.Candle, log *zap.Logger) {
+	if d == nil {
+		return
+	}
+
+	writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := d.UpsertBatch(writeCtx, symbol, interval, candles); err != nil {
+		log.Warn("failed to upsert bootstrap candles to timescaledb", zap.String("symbol", symbol), zap.String("interval", interval), zap.Error(err))
+	}
 }
 
 // computeStart computes REST start time from local snapshot state.

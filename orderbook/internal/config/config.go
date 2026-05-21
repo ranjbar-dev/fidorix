@@ -25,6 +25,8 @@ const (
 	defaultMaxReconnectDelaySec = 60
 	defaultRESTBaseURL          = "https://api.mexc.com"
 	defaultWSBaseURL            = "wss://wbs-api.mexc.com/ws"
+	defaultRedisAddr            = "redis:6379"
+	defaultRedisDB              = 0
 )
 
 // Config contains all runtime settings for the application.
@@ -41,6 +43,9 @@ type Config struct {
 	MaxReconnectDelaySec int
 	RESTBaseURL          string
 	WSBaseURL            string
+	RedisAddr            string
+	RedisPassword        string
+	RedisDB              int
 }
 
 // Load reads the .env file when present, applies defaults, and validates values.
@@ -49,9 +54,10 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("load .env file: %w", err)
 	}
 
-	symbols := parseSymbols(getEnv("SYMBOL", defaultSymbol))
+	rawSymbols := getEnv("SYMBOLS", getEnv("SYMBOL", defaultSymbol))
+	symbols := parseSymbols(rawSymbols)
 	if len(symbols) == 0 {
-		return Config{}, fmt.Errorf("SYMBOL must contain at least one value")
+		return Config{}, fmt.Errorf("SYMBOLS must contain at least one value")
 	}
 
 	depthLimit, err := parseInt("DEPTH_LIMIT", getEnv("DEPTH_LIMIT", strconv.Itoa(defaultDepthLimit)))
@@ -120,6 +126,13 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("WS_BASE_URL cannot be empty")
 	}
 
+	redisAddr := getEnvWithDefaultAllowEmpty("REDIS_ADDR", defaultRedisAddr)
+	redisPassword := strings.TrimSpace(os.Getenv("REDIS_PASSWORD"))
+	redisDB, err := parseInt("REDIS_DB", getEnv("REDIS_DB", strconv.Itoa(defaultRedisDB)))
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		Symbols:              symbols,
 		DepthLimit:           depthLimit,
@@ -133,6 +146,9 @@ func Load() (Config, error) {
 		MaxReconnectDelaySec: maxReconnectDelaySec,
 		RESTBaseURL:          restBaseURL,
 		WSBaseURL:            wsBaseURL,
+		RedisAddr:            redisAddr,
+		RedisPassword:        redisPassword,
+		RedisDB:              redisDB,
 	}, nil
 }
 
@@ -185,6 +201,14 @@ func getEnv(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func getEnvWithDefaultAllowEmpty(key, fallback string) string {
+	raw, ok := os.LookupEnv(key)
+	if !ok {
+		return fallback
+	}
+	return strings.TrimSpace(raw)
 }
 
 func parseInt(name, raw string) (int, error) {

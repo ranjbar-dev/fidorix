@@ -32,6 +32,28 @@ services:
     networks:
       - broker_network
 
+  orderbook:
+    build:
+      context: ./orderbook
+    restart: unless-stopped
+    networks:
+      - broker_network
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  kline:
+    build:
+      context: ./kline
+    restart: unless-stopped
+    networks:
+      - broker_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres_data:
     name: postgres_data

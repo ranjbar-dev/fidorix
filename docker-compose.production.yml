@@ -29,3 +29,21 @@ services:
         limits:
           cpus: '1'
           memory: 2G
+
+  orderbook:
+    container_name: broker_orderbook_prod
+    env_file: ./orderbook/.env.production
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  kline:
+    container_name: broker_kline_prod
+    env_file: ./kline/.env.production
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G

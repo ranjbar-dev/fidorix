@@ -23,3 +23,11 @@ services:
       # Exposed in development for local tooling and local integration testing.
       - "6379:6379"
     command: ["sh", "-c", "redis-server /etc/redis/redis.development.conf --requirepass $${REDIS_PASSWORD}"]
+
+  orderbook:
+    container_name: broker_orderbook_dev
+    env_file: ./orderbook/.env.development
+
+  kline:
+    container_name: broker_kline_dev
+    env_file: ./kline/.env.development

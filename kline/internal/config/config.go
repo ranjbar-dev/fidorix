@@ -47,6 +47,10 @@ type Config struct {
 	BootstrapWorkers int
 	LogLevel         string
 	ShardSize        int
+	TimescaleDSN     string
+	RedisAddr        string
+	RedisPassword    string
+	RedisDB          int
 	Intervals        []string
 }
 
@@ -66,7 +70,7 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
-	pingSeconds, err := intFromEnv("WS_PING_INTERVAL", 15)
+	pingInterval, err := durationFromEnv("WS_PING_INTERVAL", 15*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +85,12 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
-	shardSize, err := intFromEnv("WS_SHARD_SIZE", 50)
+	shardSize, err := intFromEnvKeys([]string{"SHARD_SIZE", "WS_SHARD_SIZE"}, 50)
+	if err != nil {
+		return nil, err
+	}
+
+	redisDB, err := intFromEnv("REDIS_DB", 0)
 	if err != nil {
 		return nil, err
 	}
@@ -103,19 +112,62 @@ func Load() (*Config, error) {
 		logLevel = "info"
 	}
 
+	redisAddr := envWithDefaultAllowEmpty("REDIS_ADDR", "redis:6379")
+
+	redisPassword := strings.TrimSpace(os.Getenv("REDIS_PASSWORD"))
+	timescaleDSN := strings.TrimSpace(os.Getenv("TIMESCALE_DSN"))
+
 	cfg := &Config{
 		Symbols:          symbols,
 		KlineDir:         klineDir,
 		BootstrapLimit:   bootstrapLimit,
-		WSPingInterval:   time.Duration(pingSeconds) * time.Second,
+		WSPingInterval:   pingInterval,
 		RESTThrottleMS:   time.Duration(throttleMS) * time.Millisecond,
 		BootstrapWorkers: workers,
 		LogLevel:         strings.ToLower(logLevel),
 		ShardSize:        shardSize,
+		TimescaleDSN:     timescaleDSN,
+		RedisAddr:        redisAddr,
+		RedisPassword:    redisPassword,
+		RedisDB:          redisDB,
 		Intervals:        append([]string(nil), Intervals...),
 	}
 
 	return cfg, nil
+}
+
+// durationFromEnv reads a duration env var and supports plain second values.
+func durationFromEnv(key string, fallback time.Duration) (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+
+	if d, err := time.ParseDuration(raw); err == nil {
+		return d, nil
+	}
+
+	seconds, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s: %w", key, err)
+	}
+	return time.Duration(seconds) * time.Second, nil
+}
+
+// intFromEnvKeys reads the first non-empty env value among the provided keys.
+func intFromEnvKeys(keys []string, fallback int) (int, error) {
+	for _, key := range keys {
+		raw := strings.TrimSpace(os.Getenv(key))
+		if raw == "" {
+			continue
+		}
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			return 0, fmt.Errorf("invalid %s: %w", key, err)
+		}
+		return value, nil
+	}
+	return fallback, nil
 }
 
 // SubscriptionCount returns total symbol-interval subscriptions.
@@ -157,4 +209,12 @@ func intFromEnv(key string, fallback int) (int, error) {
 		return 0, fmt.Errorf("invalid %s: %w", key, err)
 	}
 	return value, nil
+}
+
+func envWithDefaultAllowEmpty(key, fallback string) string {
+	raw, ok := os.LookupEnv(key)
+	if !ok {
+		return fallback
+	}
+	return strings.TrimSpace(raw)
 }
