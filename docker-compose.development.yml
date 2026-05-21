@@ -10,3 +10,16 @@ services:
     ports:
       # Exposed in development for local tooling (pgAdmin, DBeaver, psql).
       - "5432:5432"
+
+  redis:
+    container_name: broker_redis_dev
+    env_file:
+      - ./deployments/redis/.env.development
+    build:
+      args:
+        # BUILD_ENV is kept for explicit build provenance.
+        BUILD_ENV: development
+    ports:
+      # Exposed in development for local tooling and local integration testing.
+      - "6379:6379"
+    command: ["sh", "-c", "redis-server /etc/redis/redis.development.conf --requirepass $${REDIS_PASSWORD}"]

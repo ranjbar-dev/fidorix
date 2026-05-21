@@ -1,2 +1,3 @@
 # Never commit production database secrets.
 deployments/postgres/.env.production
+deployments/redis/.env.production

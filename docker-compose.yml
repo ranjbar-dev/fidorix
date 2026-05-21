@@ -17,9 +17,26 @@ services:
     networks:
       - broker_network
 
+  redis:
+    build:
+      context: ./deployments/redis
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      # Use container env vars so health checks validate expected auth behavior.
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - broker_network
+
 volumes:
   postgres_data:
     name: postgres_data
+  redis_data:
+    name: redis_data
 
 networks:
   broker_network:
